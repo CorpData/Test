@@ -1,25 +1,67 @@
-# This is a template for a Ruby scraper on morph.io (https://morph.io)
-# including some code snippets below that you should find helpful
+# encoding: UTF-8
+require 'nokogiri'
+require 'mechanize'
+require 'scrapers/mcf'
 
-# require 'scraperwiki'
-# require 'mechanize'
-#
-# agent = Mechanize.new
-#
-# # Read in a page
-# page = agent.get("http://foo.com")
-#
-# # Find somehing on the page using css selectors
-# p page.at('div.content')
-#
-# # Write out to the sqlite database using scraperwiki library
-# ScraperWiki.save_sqlite(["name"], {"name" => "susan", "occupation" => "software developer"})
-#
-# # An arbitrary query against the database
-# ScraperWiki.select("* from data where 'name'='peter'")
+BASE_URL = "http://www.ccd.gov.jo:7779"
+  
+@br = Mechanize.new { |b|
+  b.user_agent_alias = 'Linux Firefox'
+  b.read_timeout = 3600
+  b.max_history=0
+  b.retry_change_requests = true
+  b.verify_mode = OpenSSL::SSL::VERIFY_NONE
+}
 
-# You don't have to do things with the Mechanize or ScraperWiki libraries.
-# You can use whatever gems you want: https://morph.io/documentation/ruby
-# All that matters is that your final data is written to an SQLite database
-# called "data.sqlite" in the current working directory which has at least a table
-# called "data".
+class String
+  def pretty
+    self.gsub(/\r|\n|\t|\s+/,' ').strip
+  end
+end
+
+class Array
+  def strip
+    self.collect{|a|a.strip}
+  end
+end
+
+def scrape(pg,act,rec)
+  data = pg.body rescue data
+  if act == "details"
+    doc = Nokogiri::HTML(data,nil,'WINDOWS-1256').xpath(".")
+    r = {"link"=>pg.uri.to_s}
+
+    tmp = s_text(doc.xpath(".//table[@width='700']/tr[2]/td/font[contains(text(),'Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ù…Ù†Ø´Ø£Ù‡')]/text()")).split(":")[1].strip rescue nil
+    r["origin_no"] = tmp
+
+    tmp = s_text(doc.xpath(".//table[@width='700']/tr[3]/td/font[contains(text(),'Ø±Ù‚Ù… Ø§Ù„Ø´Ø±ÙƒØ©')]/text()")).split(":").last.strip
+    r["company_number"] = tmp
+
+    tmp = s_text(doc.xpath(".//table[@width='700']/tr[3]/td/font[contains(text(),'Ù†ÙˆØ¹ Ø§Ù„Ø´Ø±ÙƒØ©')]/text()")).split(":").last.strip
+    r["type"] = tmp
+
+    tmp = s_text(doc.xpath(".//table[@width='700']/tr[4]/td/font[contains(text(),'Ø§Ø³Ù… Ø§Ù„Ø´Ø±ÙƒØ©')]/text()")).split(":").last.strip
+    r["company_name"] = tmp
+
+    tmp = Date.parse(s_text(doc.xpath(".//table[@width='700']/tr[6]/td/font[contains(text(),'ØªØ§Ø±ÙŠØ® ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø´Ø±ÙƒØ©')]/text()")).split(":").last.strip).to_s rescue nil
+    r["reg_dt"] = tmp
+
+
+    return r.merge(rec).delete_if{|k,v| k =~ /^tmp_/}
+  end
+end
+
+def action()
+  strt = get_metadata("start",1)
+  (strt..strt+10000).each_with_index{|id,idx|
+    pg = @br.get(BASE_URL + "/ccd/aims_q1a?c_id=#{id}") rescue nil
+     next if pg.nil? 
+    record = scrape(pg,"details",{"reference_no"=>id})
+    ScraperWiki.save_sqlite(unique_keys=['company_number'],record)
+    save_metadata("start",strt+idx)
+  }
+end
+
+action()
+#puts scrape(@br.get("http://www.ccd.gov.jo:7779/ccd/aims_q1a?c_id=1"),"details",{})
+#puts scrape(@br.get("http://www.ccd.gov.jo:7779/ccd/aims_q1a?c_id=169678"),"details",{})
